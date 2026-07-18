@@ -116,6 +116,7 @@ export default function GameContainer() {
                                                     //replace yours^^^
 
 
+
             try {
                 const ownerAddress = await contract.owner();
                 setIsOwner(
