@@ -69,12 +69,12 @@ contract GameRunner {
     }
 
     function startGame() public payable onlyEOA whenNotPaused {
-        uint256 requiredFee = getEntryFeeForPlayer(msg.sender);
-        require(msg.value == requiredFee, "Wrong entry fee");
-        ladderPool += msg.value;
+    uint256 requiredFee = getEntryFeeForPlayer(msg.sender);
+    require(msg.value >= requiredFee, "Insufficent entry fee");
 
-        playerProfiles[msg.sender].gamesPlayed += 1;
-    }
+    ladderPool += msg.value;
+    playerProfiles[msg.sender].gamesPlayed += 1;
+}
 
     function claimReward(uint256 score) public onlyEOA whenNotPaused nonReentrant {
         uint256 reward = 0;
@@ -115,6 +115,8 @@ contract GameRunner {
         emit GameEnded(msg.sender, score, reward);
     }
 
+
+
     function _updateLeaderboard(address player, uint256 score) internal {
         bool exists = false;
         uint256 userIndex;
@@ -147,65 +149,35 @@ contract GameRunner {
             leaderboard[uint256(j) + 1] = key;
         }
 
-        while (leaderboard.length > 5) {
+        while (leaderboard.length > 1) {
             leaderboard.pop();
         }
     }
 
-    function distributeLadderPool() public onlyOwner nonReentrant {
-        uint256 length = leaderboard.length;
-        require(length > 0, "No players");
-        require(ladderPool > 0, "Pool empty");
-        require(address(this).balance >= ladderPool, "Low balance");
+   function distributeLadderPool() public onlyOwner nonReentrant {
+    uint256 length = leaderboard.length;
+    require(length > 0, "No players");
 
-        uint256 poolToDistribute = ladderPool;
-        address[] memory winners = new address[](length < 3 ? length : 3);
-        uint256[] memory rewards = new uint256[](length < 3 ? length : 3);
+    uint256 poolToDistribute = address(this).balance;
 
-        for (uint256 i = 0; i < length; i++) {
-            address player = leaderboard[i].player;
-            uint256 currentTier = playerDiscountTier[player];
+    address[] memory winners = new address[](1);
+    uint256[] memory rewards = new uint256[](1);
 
-            if (i == 0 && currentTier < 3) {
-                playerDiscountTier[player] = 3;
-            } else if (i == 1 && currentTier < 2) {
-                playerDiscountTier[player] = 2;
-            } else if (i >= 2 && currentTier < 1) {
-                playerDiscountTier[player] = 1;
-            }
-        }
+    address champion = leaderboard[0].player;
+    playerDiscountTier[champion] = 3;
 
-        if (length == 1) {
-            winners[0] = leaderboard[0].player;
-            rewards[0] = poolToDistribute;
-            _sendValue(winners[0], rewards[0]);
-        } else if (length == 2) {
-            winners[0] = leaderboard[0].player;
-            rewards[0] = (poolToDistribute * 70) / 100;
-            _sendValue(winners[0], rewards[0]);
+    winners[0] = champion;
+    rewards[0] = poolToDistribute;
 
-            winners[1] = leaderboard[1].player;
-            rewards[1] = (poolToDistribute * 30) / 100;
-            _sendValue(winners[1], rewards[1]);
-        } else {
-            winners[0] = leaderboard[0].player;
-            rewards[0] = (poolToDistribute * 50) / 100;
-            _sendValue(winners[0], rewards[0]);
-
-            winners[1] = leaderboard[1].player;
-            rewards[1] = (poolToDistribute * 30) / 100;
-            _sendValue(winners[1], rewards[1]);
-
-            winners[2] = leaderboard[2].player;
-            rewards[2] = (poolToDistribute * 20) / 100;
-            _sendValue(winners[2], rewards[2]);
-        }
-
-        emit LadderDistributed(winners, rewards);
-
-        ladderPool = 0.001 ether;
-        delete leaderboard;
+    if (poolToDistribute > 0) {
+        _sendValue(winners[0], rewards[0]);
     }
+
+    emit LadderDistributed(winners, rewards);
+
+    ladderPool = 0;
+    delete leaderboard;
+}
 
     function _sendValue(address to, uint256 value) internal {
         (bool success, ) = payable(to).call{value: value}("");
@@ -233,10 +205,12 @@ contract GameRunner {
         entryFee = _newFee;
     }
 
-    function setLadderPool(uint256 _newPool) public onlyOwner {
-        emit PoolUpdated(ladderPool, _newPool);
-        ladderPool = _newPool;
-    }
+    function setLadderPool(uint256 _newPool) public onlyOwner payable {
+    uint256 finalPoolValue = msg.value > 0 ? msg.value : _newPool;
+
+    emit PoolUpdated(ladderPool, finalPoolValue);
+    ladderPool = finalPoolValue;
+}
 
     function getLeaderboard() public view returns (Leader[] memory) {
         return leaderboard;

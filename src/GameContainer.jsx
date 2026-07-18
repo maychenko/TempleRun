@@ -96,6 +96,7 @@ export default function GameContainer() {
         if (savedUpgrades) setUpgrades(JSON.parse(savedUpgrades));
     }, [account]);
 
+
     // fetch data from web3 contract
     const loadContractData = async (userAddr) => {
         if (!window.ethereum || !userAddr) return;
@@ -164,26 +165,31 @@ export default function GameContainer() {
             const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
             const currentLeaders = [...blockchainLeaderboard];
-            const tx = await contract.distributeLadderPool();
+            const tx = await contract.distributeLadderPool({
+                gasLimit: 300000
+            });
+
+            setStatusText('Transaction sent! Waiting for block...');
             await tx.wait();
 
             const myIndex = currentLeaders.findIndex(l => l.player.toLowerCase() === account.toLowerCase());
-            if (myIndex !== -1 && myIndex < 3) {
-                const placementText = myIndex === 0 ? "1st PLACE 🏆" : myIndex === 1 ? "2nd PLACE 🥈" : "3rd PLACE 🥉";
-                setCongratsMessage(`CONGRATULATIONS! You just won the ladder round at ${placementText}! Your payout and a permanent discount have been credited!`);
+            if (myIndex !== -1 && myIndex < 1) {
+                setCongratsMessage(`CONGRATULATIONS! You just won the ladder round as CHAMPION!`);
             }
 
-            loadContractData(account);
+            await loadContractData(account);
             setStatusText('Ladder pool successfully distributed!');
             setTimeout(() => setStatusText(''), 5000);
         } catch (e) {
-            console.error(e);
-            setStatusText('Distribution skip (empty pool or no players)');
-            setTimeout(() => setStatusText(''), 4000);
+            console.error("REAL BLOCKCHAIN ERROR:", e);
+            setStatusText(`Error: ${e.reason || e.message || 'Unknown EVM error'}`);
+            setTimeout(() => setStatusText(''), 6000);
         }
     };
 
-    // countdown loop for contract cycle
+    const isAutoDistributing = useRef(false);
+
+    // Countdown loop for contract cycle
     useEffect(() => {
         const intervalDurationSeconds = parseFloat(newTimerInput) * 60 || 600;
         let targetPayoutTime = localStorage.getItem('next_payout_timestamp');
@@ -193,18 +199,30 @@ export default function GameContainer() {
             localStorage.setItem('next_payout_timestamp', targetPayoutTime);
         }
 
-        const timer = setInterval(() => {
+        const timer = setInterval(async () => {
             const now = Date.now();
             const remaining = Math.max(0, Math.floor((Number(targetPayoutTime) - now) / 1000));
 
             setTimeLeftToPayout(remaining);
-
-            if (remaining <= 0) {
-                const newTarget = Date.now() + intervalDurationSeconds * 1000;
-                localStorage.setItem('next_payout_timestamp', newTarget);
+            if (remaining <= 0 && !isAutoDistributing.current) {
 
                 if (isOwner && account) {
-                    handleDistributePoolSilent();
+                    isAutoDistributing.current = true;
+
+                    try {
+                        await handleDistributePoolSilent();
+
+                        const newTarget = Date.now() + intervalDurationSeconds * 1000;
+                        localStorage.setItem('next_payout_timestamp', newTarget);
+                        setTimeLeftToPayout(intervalDurationSeconds);
+                    } catch (err) {
+                        console.error("Auto payout failed:", err);
+                    } finally {
+                        isAutoDistributing.current = false;
+                    }
+                } else {
+                    const newTarget = Date.now() + intervalDurationSeconds * 1000;
+                    localStorage.setItem('next_payout_timestamp', newTarget);
                 }
             }
         }, 1000);
@@ -237,8 +255,8 @@ export default function GameContainer() {
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-
-            const tx = await contract.startGame({ value: ethers.parseEther(playerCustomFee) });
+            const requiredFee = await contract.getEntryFeeForPlayer(account);
+            const tx = await contract.startGame({ value: requiredFee });
             await tx.wait();
 
             const addr = account.toLowerCase();
@@ -271,7 +289,10 @@ export default function GameContainer() {
             const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
             const currentLeaders = [...blockchainLeaderboard];
-            const tx = await contract.claimReward(finalScore);
+
+            const tx = await contract.claimReward(finalScore, {
+                gasLimit: 700000
+            });
             await tx.wait();
 
             const profile = await contract.getPlayerProfile(account);
@@ -314,7 +335,7 @@ export default function GameContainer() {
         if (totalUpgradesCount === 1 && localStorage.getItem(`ach_first_upgrade_${addr}`) !== 'true') {
             localStorage.setItem(`ach_first_upgrade_${addr}`, 'true');
             saveCoins(gameCoins + 25);
-            setCongratsMessage("🏆 LOCAL ACHIEVEMENT UNLOCKED: First Upgrade bought! +25 Coins!");
+            setCongratsMessage("LOCAL ACHIEVEMENT UNLOCKED: First Upgrade bought! +25 Coins!");
         }
         if (!account) return alert('Connect wallet!');
         const currentLvl = upgrades[type];
@@ -339,10 +360,24 @@ export default function GameContainer() {
     const handleUpdatePoolContract = async () => {
         if (!newPoolInput) return;
         try {
-            const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, await new ethers.BrowserProvider(window.ethereum).getSigner());
-            await (await contract.setLadderPool(ethers.parseEther(newPoolInput))).wait();
-            alert('Pool updated!'); setNewPoolInput(''); loadContractData(account);
-        } catch (e) { console.error(e); }
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+            const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+            const valueToSend = ethers.parseEther(newPoolInput);
+
+            const tx = await contract.setLadderPool(valueToSend, {
+                value: valueToSend,
+                gasLimit: 100000
+            });
+
+            await tx.wait();
+            alert('Pool updated with real ETH!');
+            setNewPoolInput('');
+            loadContractData(account);
+        } catch (e) {
+            console.error(e);
+        }
     };
 
     const handleUpdateTimerAdmin = () => {
@@ -556,9 +591,9 @@ export default function GameContainer() {
 
         function createObstacleObject(scene, lane, type) {
             let obs;
-            let speed = 300;
-            if (currentScore > 50 && currentScore <= 100) speed = 400;
-            if (currentScore > 100) speed = 500;
+            let speed = 250;
+            if (currentScore > 50 && currentScore <= 100) speed = 360;
+            if (currentScore > 100) speed = 440;
 
             if (type === 'low') {
                 obs = scene.add.rectangle(lane, -50, 36, 30, 0xef4444);
@@ -901,7 +936,7 @@ export default function GameContainer() {
                     {activeTab === 'leaderboard' && (
                         <div className="w-full bg-slate-900/40 p-4 rounded-2xl border border-slate-900 text-xs text-left space-y-2">
                             <div className="flex justify-between font-bold text-slate-400">
-                                <span>On-Chain Top 5 (Active Pool: {ladderPool} ETH)</span>
+                                <span>Current Bracket Champion (Top 1) (Active Pool: {ladderPool} ETH)</span>
                             </div>
                             <div className="space-y-1">
                                 {blockchainLeaderboard.map((item, i) => (
@@ -935,7 +970,7 @@ export default function GameContainer() {
 
                             <div className="grid grid-cols-2 gap-2 mt-2">
                                 <button onClick={handleTogglePauseContract} className={`py-2 font-black rounded-lg text-center text-white ${isPaused ? 'bg-emerald-600' : 'bg-red-600'}`}>
-                                    {isPaused ? '▶️ UNPAUSE CONTRACT' : 'EMERGENCY PAUSE'}
+                                    {isPaused ? ' UNPAUSE CONTRACT' : 'EMERGENCY PAUSE'}
                                 </button>
                                 <button onClick={handleDistributePoolSilent} className="py-2 bg-indigo-600 text-white font-bold rounded-lg text-center">
                                     FORCE PAYOUT ROUND
