@@ -229,4 +229,5 @@ contract GameRunner {
     receive() external payable {
         revert("Direct deposits disabled");
     }
+
 }

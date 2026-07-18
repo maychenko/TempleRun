@@ -113,6 +113,8 @@ export default function GameContainer() {
             const tier = Number(await contract.playerDiscountTier(userAddr));
 
             const MY_ADMIN_ADDRESS = "0xed53c0f2bc7d9a87424286073b9fc31ff8371cda";
+                                                    //replace yours^^^
+
 
             try {
                 const ownerAddress = await contract.owner();

@@ -1,6 +1,9 @@
 export const CONTRACT_ADDRESS = "0xb69b1b9D0076dC45728a10b94F76C2F84B077b22";
+                                    //replace^^^
+export const CONTRACT_ABI =
+      //replace
 
-export const CONTRACT_ABI = [
+    [
     {
         "inputs": [],
         "stateMutability": "nonpayable",
